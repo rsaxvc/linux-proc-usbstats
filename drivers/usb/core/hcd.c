@@ -1748,6 +1748,8 @@ static void __usb_hcd_giveback_urb(struct urb *urb)
 	struct usb_anchor *anchor = urb->anchor;
 	int status = urb->unlinked;
 	unsigned long flags;
+	unsigned dir = usb_urb_dir_out(urb);
+	unsigned pipetype = usb_pipetype(urb->pipe);
 
 	urb->hcpriv = NULL;
 	if (unlikely((urb->transfer_flags & URB_SHORT_NOT_OK) &&
@@ -1756,6 +1758,9 @@ static void __usb_hcd_giveback_urb(struct urb *urb)
 		status = -EREMOTEIO;
 
 	unmap_urb_for_dma(hcd, urb);
+	urb->dev->stats_packets[dir][pipetype]++;
+	urb->dev->stats_bytes[dir][pipetype] += urb->actual_length;
+
 	usbmon_urb_complete(&hcd->self, urb, status);
 	usb_anchor_suspend_wakeups(anchor);
 	usb_unanchor_urb(urb);

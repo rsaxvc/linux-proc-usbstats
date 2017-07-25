@@ -422,6 +422,7 @@ struct usb_endpoint_descriptor {
 #define USB_ENDPOINT_XFER_ISOC		1
 #define USB_ENDPOINT_XFER_BULK		2
 #define USB_ENDPOINT_XFER_INT		3
+#define USB_ENDPOINT_XFER_COUNT     4       /* not an endpoint */
 #define USB_ENDPOINT_MAX_ADJUSTABLE	0x80
 
 #define USB_ENDPOINT_MAXP_MASK	0x07ff

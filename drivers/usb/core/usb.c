@@ -40,6 +40,8 @@
 #include <linux/workqueue.h>
 #include <linux/debugfs.h>
 #include <linux/usb/of.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
 
 #include <asm/io.h>
 #include <linux/scatterlist.h>
@@ -1194,6 +1196,89 @@ static void usb_debugfs_cleanup(void)
 	debugfs_remove(usb_debug_root);
 }
 
+/* This is a recursive function.
+ * The caller must own the device lock.
+ */
+static int usbstats_walk(struct seq_file *m,
+			 struct usb_device *usbdev,
+			 struct usb_bus *bus,
+			 int level)
+{
+	int chix;
+	int ret;
+	unsigned pipe;
+	struct usb_device *childdev = NULL;
+
+	if (level > MAX_TOPO_LEVEL)
+		return 0;
+
+	/*Bus Dev */
+	seq_printf(m, "%d %d ", bus->busnum, usbdev->devnum);
+
+	/* BytesRead BytesWritten PacketsRead PacketsWritten*/
+	for(pipe = 0; pipe <USB_ENDPOINT_XFER_COUNT; ++pipe) {
+		seq_printf(m, " %llu %llu ",
+			usbdev->stats_bytes[0][pipe],
+			usbdev->stats_bytes[1][pipe]);
+	}
+
+	for(pipe = 0; pipe <USB_ENDPOINT_XFER_COUNT; ++pipe) {
+		seq_printf(m, " %llu %llu ",
+			usbdev->stats_packets[0][pipe],
+			usbdev->stats_packets[1][pipe]);
+	}
+	seq_printf(m, "\n" );
+
+	/* Now look at all of this device's children. */
+	usb_hub_for_each_child(usbdev, chix, childdev) {
+		usb_lock_device(childdev);
+		ret = usbstats_walk(m, childdev, bus,
+			level + 1);
+		usb_unlock_device(childdev);
+		if (ret != 0)
+			return ret;
+	}
+	return 0;
+}
+
+static int usbstats_show(struct seq_file *m, void *v)
+{
+	struct usb_bus *bus;
+	ssize_t ret, total_written = 0;
+	int id;
+
+	mutex_lock(&usb_bus_idr_lock);
+	/* print devices for all busses */
+	idr_for_each_entry(&usb_bus_idr, bus, id) {
+		/* recurse through all children of the root hub */
+		if (!bus_to_hcd(bus)->rh_registered)
+			continue;
+		usb_lock_device(bus->root_hub);
+		ret = usbstats_walk(m, bus->root_hub, bus, 0 );
+		usb_unlock_device(bus->root_hub);
+		if (ret < 0) {
+			mutex_unlock(&usb_bus_idr_lock);
+			return ret;
+		}
+		total_written += ret;
+	}
+	mutex_unlock(&usb_bus_idr_lock);
+	return 0;
+}
+
+static int usbstats_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, usbstats_show, NULL);
+}
+
+static const struct file_operations usbstats_fops = {
+	.owner      = THIS_MODULE,
+	.open       = usbstats_open,
+	.read       = seq_read,
+	.llseek     = seq_lseek,
+	.release    = single_release,
+};
+
 /*
  * Init
  */
@@ -1229,10 +1314,13 @@ static int __init usb_init(void)
 	retval = usb_hub_init();
 	if (retval)
 		goto hub_init_failed;
+	if( !proc_create("usbstats", 0, NULL, &usbstats_fops) )
+		goto proc_init_failed;
 	retval = usb_register_device_driver(&usb_generic_driver, THIS_MODULE);
 	if (!retval)
 		goto out;
 
+proc_init_failed:
 	usb_hub_cleanup();
 hub_init_failed:
 	usb_devio_cleanup();
@@ -1260,6 +1348,7 @@ static void __exit usb_exit(void)
 	if (usb_disabled())
 		return;
 
+	remove_proc_entry("usbstats", NULL);
 	usb_deregister_device_driver(&usb_generic_driver);
 	usb_major_cleanup();
 	usb_deregister(&usbfs_driver);

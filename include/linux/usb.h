@@ -608,6 +608,8 @@ struct usb3_lpm_parameters {
  *	to keep track of the number of functions that require USB 3.0 Link Power
  *	Management to be disabled for this usb_device.  This count should only
  *	be manipulated by those functions, with the bandwidth_mutex is held.
+ * @stats_packets: total number of packets by direction then endpoint
+ * @stats_bytes: total number of bytes by direction then endpoint
  *
  * Notes:
  * Usbcore drivers should not set usbdev->state directly.  Instead use
@@ -688,6 +690,9 @@ struct usb_device {
 	struct usb3_lpm_parameters u1_params;
 	struct usb3_lpm_parameters u2_params;
 	unsigned lpm_disable_count;
+
+	unsigned long long stats_packets[2/*DIR:IN,OUT*/][USB_ENDPOINT_XFER_COUNT];
+	unsigned long long stats_bytes[2/*DIR:IN,OUT*/][USB_ENDPOINT_XFER_COUNT];
 };
 #define	to_usb_device(d) container_of(d, struct usb_device, dev)
 
